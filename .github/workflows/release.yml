@@ -1,0 +1,88 @@
+name: Deploy - Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build del ejecutable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonando proyecto
+        uses: actions/checkout@v6.1.0
+
+      - name: Configurar Node 24
+        uses: actions/setup-node@v6.5.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validar version del tag
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::El tag $GITHUB_REF_NAME no coincide con la version de package.json ($VERSION)"
+            exit 1
+          fi
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Empaquetar assets
+        run: |
+          mkdir -p release
+          cp dist/biblioteca-api.cjs "release/biblioteca-api-$GITHUB_REF_NAME.cjs"
+          zip -j "release/biblioteca-api-$GITHUB_REF_NAME.zip" dist/biblioteca-api.cjs README.md .env.example
+          ls -lh release
+
+      - name: Subir assets
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-assets
+          path: release/
+
+  release:
+    name: Publicar release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Descargar assets
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: release-assets
+          path: release
+
+      - name: Crear release en GitHub
+        uses: softprops/action-gh-release@v3.0.0
+        with:
+          name: Biblioteca API ${{ github.ref_name }}
+          body: |
+            Requiere Node.js 22 o superior.
+
+            Descargar `biblioteca-api-${{ github.ref_name }}.cjs` y ejecutar:
+
+            ```bash
+            node biblioteca-api-${{ github.ref_name }}.cjs
+            ```
+
+            Con perfil prod:
+
+            ```bash
+            APP_PROFILE=prod API_KEY=mi_clave node biblioteca-api-${{ github.ref_name }}.cjs
+            ```
+
+            La API queda disponible en http://localhost:3000/health
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: release/*
