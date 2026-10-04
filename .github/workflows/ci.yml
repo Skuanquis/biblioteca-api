@@ -1,0 +1,68 @@
+name: CI - Build y Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build y Test (${{ matrix.os }} / Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [22, 24]
+    steps:
+      - name: Clonando proyecto
+        uses: actions/checkout@v6.1.0
+
+      - name: Configurar Node ${{ matrix.node }}
+        uses: actions/setup-node@v6.5.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Verificar tipos
+        run: npm run typecheck
+
+      - name: Pruebas con perfil prod
+        run: npm run test:coverage
+        env:
+          APP_PROFILE: prod
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Smoke test
+        shell: bash
+        run: bash scripts/smoke-test.sh
+        env:
+          APP_PROFILE: prod
+          PORT: 3000
+          API_KEY: ${{ secrets.API_KEY || 'ci-api-key' }}
+
+      - name: Subir build
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: biblioteca-api-${{ matrix.os }}-node${{ matrix.node }}
+          path: dist/
+
+      - name: Subir reporte de cobertura
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 24
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: cobertura
+          path: coverage/
